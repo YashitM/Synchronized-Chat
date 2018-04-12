@@ -8,29 +8,34 @@
 #define true 1
 #define false 0
 
-#define max_queue_size 1024
+#define max_queue_elements 100
+#define num_test_cases 50
 
+pthread_t thread[num_test_cases];
+volatile int index_written[max_queue_elements];
 key_t key = 2344234;
+int shmid;
 
-void read_func()
+int getRandom(int range) 
 {
-    int shmid;
-    char *data;
+    return rand() % range;
+}
 
-    if ((shmid = shmget(key, max_queue_size, 0644 | IPC_CREAT)) == -1)
-    {
-        perror("shmget");
-        exit(1);
-    }
-
-    if ((data = shmat(shmid, (void *)0, 0)) == (char *)(-1))
+void *read_func(void *id)
+{
+    int *data;
+    int *shmid = (int *)id;
+    if ((data = shmat(*shmid, (void *)0, 0)) == (int *)(-1))
     {
         perror("shmat");
         exit(1);
     }
+    int index_to_read = getRandom(max_queue_elements);
+    while(index_written[index_to_read] != 1) {
+        index_to_read = getRandom(max_queue_elements);
+    }
 
-    printf("Data read: %s\n", data);
-
+    printf("Data read at Index %d: %d\n", index_to_read, data[index_to_read]);
     if (shmdt(data) == -1)
     {
         perror("shmdt");
@@ -38,26 +43,25 @@ void read_func()
     }
 }
 
-void write_func()
+void *write_func(void* id)
 {
-    int shmid;
-    char *data;
+    int *data;
+    int *shmid = (int *)id;
 
-    if ((shmid = shmget(key, max_queue_size, 0644 | IPC_CREAT)) == -1)
-    {
-        perror("shmget");
-        exit(1);
-    }
+    int index_to_insert = getRandom(max_queue_elements);
+    int data_to_insert = getRandom(100);
+    
 
-    if ((data = shmat(shmid, (void *)0, 0)) == (char *)(-1))
+    if ((data = shmat(*shmid, (void *)0, 0)) == (int *)(-1))
     {
         perror("shmat");
         exit(1);
     }
 
-    printf("Enter your message: ");
+    printf("Inserting %d at %d\n", data_to_insert, index_to_insert);
 
-    fgets(data, sizeof(data), stdin);
+    data[index_to_insert] = data_to_insert;
+    index_written[index_to_insert] = 1;
 
     if (shmdt(data) == -1)
     {
@@ -68,37 +72,38 @@ void write_func()
 
 int main(int argc, char *argv[])
 {
-    while (true)
+    int id;
+
+    if ((id = shmget(key, max_queue_elements * sizeof(int), 0644 | IPC_CREAT)) == -1)
     {
-        int choice;
-        printf("Select an option:\n");
-        printf("1. Write\n");
-        printf("2. Read\n");
-        printf("3. Exit\n");
-        printf("Enter your choice: ");
-        scanf("%d", &choice);
-        while ((getchar()) != '\n')
-            ;
-        if (choice == 1)
+        perror("shmget");
+        exit(1);
+    }
+
+    int temp_cases = num_test_cases;
+
+    while (temp_cases > 0)
+    {
+        int choice = getRandom(2);
+        if (choice == 0)
         {
-            write_func();
+            pthread_create(&thread[temp_cases], NULL, write_func, &id);
+        }
+        else if (choice == 1)
+        {
+            pthread_create(&thread[temp_cases], NULL, read_func, &id);
         }
         else if (choice == 2)
         {
-            read_func();
-        }
-        else if (choice == 3)
-        {
             return 0;
         }
-
-        // sem_init(&mutex, 1, 0);
-        // pthread_create(&thread_write, NULL, write, NULL);
-        // pthread_create(&thread_read, NULL, read, NULL);
-        // pthread_join(thread_write, NULL);
-        // pthread_join(thread_read, NULL);
-        // sem_destroy(&mutex);
+        temp_cases -= 1;
     }
 
+    temp_cases = num_test_cases;
+
+    while (temp_cases-- > 0) {
+        pthread_join(thread[temp_cases], NULL);
+    }
     return 0;
 }
